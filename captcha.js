@@ -1,23 +1,20 @@
 const { env } = require("node:process");
-const antiCaptcha = require("@antiadmin/anticaptchaofficial");
+const { RuCaptcha } = require("./rucaptcha.js");
 
-function fetchToken(action) {
+let ruCaptcha = new RuCaptcha();
+
+function fetchToken(action, userAgent) {
   const url = "https://www.reestr-zalogov.ru/search";
   const websiteKey = env.WEBSITE_KEY;
 
-  return antiCaptcha.solveRecaptchaV3(
-    url,
-    websiteKey,
-    0.9, //minimum score required: 0.3, 0.7 or 0.9
-    action,
-  );
+  return ruCaptcha.solveRecaptchaV3(url, websiteKey, action, userAgent);
 }
 
 const fetchNotaryToken = () => fetchToken("search_notary");
 const fetchFedresursToken = () => fetchToken("search_fedresurs");
 const fetchTokens = () =>
   Promise.all([fetchNotaryToken(), fetchFedresursToken()]);
-const setAPIKey = (key) => antiCaptcha.setAPIKey(key);
+const setAPIKey = (key) => ruCaptcha.setAPIKey(key);
 
 module.exports = {
   setAPIKey,

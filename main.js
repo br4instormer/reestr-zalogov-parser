@@ -3,9 +3,10 @@ const { env } = require("node:process");
 const { firefox } = require("playwright-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const { getRandomLine, readLinesFromFile } = require("./utilities.js");
-const AntiCaptcha = require("./anti-captcha.js");
+const { RuCaptchaError } = require("./rucaptcha.js");
+const Captcha = require("./captcha.js");
 
-const ANTICAPTHA_API_KEY = env.ANTICAPTHA_API_KEY;
+const RUCAPTCHA_API_KEY = env.RUCAPTCHA_API_KEY;
 
 function parseProxy(line) {
   const { 0: server, 1: creds } = line.split("@");
@@ -36,7 +37,7 @@ function fetchData(page, url, body) {
 }
 
 async function fetchNotary(page, body) {
-  const token = await AntiCaptcha.fetchNotaryToken();
+  const token = await Captcha.fetchNotaryToken();
 
   return await fetchData(
     page,
@@ -46,7 +47,7 @@ async function fetchNotary(page, body) {
 }
 
 async function fetchFedresurs(page, body) {
-  const token = await AntiCaptcha.fetchFedresursToken();
+  const token = await Captcha.fetchFedresursToken();
 
   return await fetchData(
     page,
@@ -61,6 +62,13 @@ async function tryFetchData(tries, executor) {
 
   do {
     data = await executor();
+
+    if (data instanceof RuCaptchaError) {
+      tries++;
+      console.warn(`Got ruCaptcha error:  ${data.message}`, data.reason());
+
+      continue;
+    }
 
     if (data instanceof Error) {
       tries++;
@@ -129,6 +137,8 @@ async function start(instance, userAgents, proxies) {
       offset: 0,
     };
 
+    console.log(`Browser uses proxy ${proxy.server}. UserAgent: ${userAgent}`);
+
     try {
       const { notary, fedresurs } = await process(browser, payload);
 
@@ -138,7 +148,7 @@ async function start(instance, userAgents, proxies) {
       console.error(`Error while processing results`, r);
     }
 
-    await sleep(3_000);
+    await sleep(15_000);
     await browser.close();
   }
 }
@@ -148,7 +158,7 @@ async function main() {
     console.error(`Error once reading "user_agents.txt". Cannot proceed`, r);
     process.exit(1);
   });
-  const proxies = await readLinesFromFile("proxies.txt").catch(() => {
+  const proxies = await readLinesFromFile("proxies.txt").catch((r) => {
     console.error(`Error once reading "proxies.txt". Cannot proceed`, r);
     process.exit(1);
   });
@@ -161,7 +171,7 @@ async function main() {
     headless: false,
   });
 
-  AntiCaptcha.setAPIKey(ANTICAPTHA_API_KEY);
+  Captcha.setAPIKey(RUCAPTCHA_API_KEY);
 
   await start(instance, userAgents, proxies);
   await instance.close();
