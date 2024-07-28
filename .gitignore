@@ -1,0 +1,6 @@
+.vscode
+.idea
+.env
+proxies.txt
+user_agents.txt
+node_modules
