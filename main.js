@@ -99,7 +99,7 @@ async function process(browser, data) {
   page.setDefaultTimeout(timeout);
   page.setDefaultNavigationTimeout(timeout);
   await page.goto("https://www.reestr-zalogov.ru/search", {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
   });
 
   const { 0: notary, 1: fedresurs } = await Promise.all([
