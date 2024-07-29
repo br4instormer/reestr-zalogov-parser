@@ -63,21 +63,21 @@ async function tryFetchData(tries, executor) {
     data = await executor();
 
     if (data instanceof RuCaptchaError) {
-      tries++;
+      errors++;
       console.warn(`Got ruCaptcha error:  ${data.message}`, data.reason());
 
       continue;
     }
 
     if (data instanceof Error) {
-      tries++;
+      errors++;
       console.warn(`Got error`, data.message);
 
       continue;
     }
 
     if (Object.hasOwn(data, "errorId")) {
-      tries++;
+      errors++;
       console.warn(`Got response with Error: ${data.message}`);
 
       continue;
