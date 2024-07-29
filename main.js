@@ -22,7 +22,6 @@ function parseProxy(line) {
 function fetchData(page, url, body) {
   return page.evaluate(
     async ({ url, body }) => {
-      console.log(body);
       return await fetch(url, {
         method: "POST",
         credentials: "same-origin",
