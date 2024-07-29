@@ -11,7 +11,7 @@
     "node": "~20.15"
   },
   "scripts": {
-    "start": "node .",
+    "start": "node --env-file=.env .",
     "install-ff": "playwright install firefox",
     "format:check": "prettier --check './*.js'",
     "format": "prettier --write './*.js'",
