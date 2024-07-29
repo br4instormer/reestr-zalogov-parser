@@ -94,7 +94,10 @@ async function process(browser, data) {
   const page = await browser.newPage();
   const body = JSON.stringify(data);
   const tries = 5;
+  const timeout = 30e3 * 3;
 
+  page.setDefaultTimeout(timeout);
+  page.setDefaultNavigationTimeout(timeout);
   await page.goto("https://www.reestr-zalogov.ru/search", {
     waitUntil: "networkidle",
   });
