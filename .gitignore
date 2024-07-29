@@ -1,6 +1,7 @@
 .vscode
 .idea
 .env
+responseData.json
 proxies.txt
 user_agents.txt
 node_modules

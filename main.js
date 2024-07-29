@@ -1,8 +1,16 @@
 const { setTimeout: sleep } = require("node:timers/promises");
+const { writeFile } = require("node:fs/promises");
+const { exec } = require("node:child_process");
 const { env } = require("node:process");
+const { join } = require("node:path");
 const { firefox } = require("playwright-extra");
+const { send } = require("./humanpost");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const { getRandomLine, readLinesFromFile } = require("./utilities.js");
+const {
+  getRandomLine,
+  readLinesFromFile,
+  getRandomInt,
+} = require("./utilities.js");
 const { RuCaptchaError } = require("./rucaptcha.js");
 const Captcha = require("./captcha.js");
 
@@ -28,11 +36,104 @@ function fetchData(page, url, body) {
         mode: "cors",
         body,
       })
-        .then((response) => response.json())
+        .then((response) => {
+          if ("json" in response) {
+            return response.json();
+          }
+
+          throw new Error(response);
+        })
         .catch((r) => new Error(r));
     },
     { url, body },
   );
+}
+
+function getPayloadFomPHP(filename) {
+  return new Promise((resolve, reject) =>
+    exec(`php ${filename}`, (err, stdout) =>
+      err ? reject(err) : resolve(stdout),
+    ),
+  );
+}
+
+function convertToPayload(parsed) {
+  if (Object.keys(parsed).length === 0 && parsed.constructor === Object) {
+    throw new Error("PHP вернул пустой JSON объект");
+  }
+
+  const { FullName } = parsed;
+
+  if (!FullName) {
+    throw new Error("Отсутствуют данные ФИО в PHP выводе");
+  }
+
+  if (typeof FullName !== "string") {
+    throw new Error("Некорректный формат данных ФИО");
+  }
+
+  const fio = FullName.split(" ");
+
+  if (fio.length !== 3) {
+    throw new Error("Некорректный формат данных ФИО");
+  }
+
+  const { 0: lastName, 1: firstName, 2: middleName } = fio;
+  const { id, Data: birthday } = parsed;
+
+  console.log(
+    `Parsed data: ${lastName} ${firstName} ${middleName} ${birthday} ${id}`,
+  );
+
+  return {
+    mode: "onlyActual",
+    filter: {
+      pledgor: {
+        privatePerson: {
+          lastName,
+          firstName,
+          middleName,
+          district: "",
+          birthday,
+          passport: "",
+        },
+      },
+    },
+    limit: 10,
+    offset: 0,
+  };
+}
+
+async function processNotaryData(data, id) {
+  if (!data) {
+    return;
+  }
+
+  if (data?.total === 0) {
+    console.log(`По данному запросу результатов не найдено: ${data.total}`);
+    console.log(data?.text);
+
+    return await send({ text: "none", id });
+  }
+
+  if (data?.data && data?.total === 1) {
+    const text = JSON.stringify(data?.data);
+    const filename = "responseData.json";
+
+    console.log(`Перехваченный ответ: ${data?.total}`);
+
+    await writeFile(
+      join(__dirname, filename),
+      JSON.stringify(data?.data, null, 2),
+      "utf-8",
+    );
+
+    return await send({ text, id });
+  }
+
+  console.log(data?.text);
+
+  return await send({ text: "error", id });
 }
 
 async function fetchNotary(page, body) {
@@ -89,10 +190,10 @@ async function tryFetchData(tries, executor) {
   return data;
 }
 
-async function process(browser, data) {
+async function getData(browser, data) {
   const page = await browser.newPage();
   const body = JSON.stringify(data);
-  const tries = 5;
+  const tries = 50;
   const timeout = 30e3 * 3;
 
   page.setDefaultTimeout(timeout);
@@ -101,68 +202,54 @@ async function process(browser, data) {
     waitUntil: "domcontentloaded",
   });
 
-  const { 0: notary, 1: fedresurs } = await Promise.all([
+  const { 0: notary } = await Promise.all([
     tryFetchData(tries, () => fetchNotary(page, body)),
-    tryFetchData(tries, () => fetchFedresurs(page, body)),
   ]);
 
   return {
     notary,
-    fedresurs,
   };
 }
 
-async function start(instance, userAgents, proxies) {
-  while (true) {
-    const proxyLine = getRandomLine(proxies);
-    const proxy = parseProxy(proxyLine);
-    const userAgent = getRandomLine(userAgents);
-    const browser = await instance.newContext({
-      userAgent,
-      proxy,
-    });
-    const payload = {
-      mode: "onlyActual",
-      filter: {
-        pledgor: {
-          privatePerson: {
-            lastName: "Петров",
-            firstName: "Иван",
-            middleName: "Иванович",
-            district: "",
-            birthday: "05.12.1975",
-            passport: "",
-          },
-        },
-      },
-      limit: 10,
-      offset: 0,
-    };
+async function process(browser, payload, id) {
+  try {
+    const { notary } = await getData(browser, payload);
 
-    console.log(`Browser uses proxy ${proxy.server}. UserAgent: ${userAgent}`);
-
-    try {
-      const { notary, fedresurs } = await process(browser, payload);
-
-      console.log(`Notary data is:`, notary);
-      console.log(`Fedresurs data is:`, fedresurs);
-    } catch (r) {
-      console.error(`Error while processing results`, r);
-    }
-
-    await sleep(15_000);
-    await browser.close();
+    await processNotaryData(notary, id);
+  } catch (r) {
+    console.error(`Error while processing results`, r);
   }
 }
 
+async function start(instance, userAgents, proxies) {
+  const proxyLine = getRandomLine(proxies);
+  const proxy = parseProxy(proxyLine);
+  const userAgent = getRandomLine(userAgents);
+  const browser = await instance.newContext({
+    userAgent,
+    proxy,
+  });
+  const stdout = await getPayloadFomPHP("start.php");
+  const parsed = JSON.parse(stdout);
+  const { id } = parsed;
+  const payload = convertToPayload(parsed);
+
+  console.log(`Browser uses proxy ${proxy.server}. UserAgent: ${userAgent}`);
+
+  await process(browser, payload, id);
+  await sleep(15_000);
+  await browser.close();
+}
+
 async function main() {
+  let repeat = false;
   const userAgents = await readLinesFromFile("user_agents.txt").catch((r) => {
     console.error(`Error once reading "user_agents.txt". Cannot proceed`, r);
-    process.exit(1);
+    getData.exit(1);
   });
   const proxies = await readLinesFromFile("proxies.txt").catch((r) => {
     console.error(`Error once reading "proxies.txt". Cannot proceed`, r);
-    process.exit(1);
+    getData.exit(1);
   });
   const stealthPlugin = StealthPlugin();
 
@@ -175,7 +262,17 @@ async function main() {
 
   Captcha.setAPIKey(RUCAPTCHA_API_KEY);
 
-  await start(instance, userAgents, proxies);
+  do {
+    try {
+      await start(instance, userAgents, proxies);
+      break;
+    } catch (e) {
+      repeat = true;
+      console.warn(`Got error while processing`, e.message);
+      await sleep(getRandomInt(60_000, 120_000));
+    }
+  } while (repeat);
+
   await instance.close();
 }
 
