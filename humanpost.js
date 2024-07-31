@@ -6,14 +6,14 @@ function send(inParams) {
     id: "1234",
   };
   const queryParams = new URLSearchParams(Object.assign(params, inParams));
-  const url = `https://humanpost?${queryParams.toString()}`;
+  const url = `https://api.checklic.ru/api/humanpost?${queryParams.toString()}`;
 
   return fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
     },
-  });
+  }).finally(() => url);
 }
 
 module.exports = {

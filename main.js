@@ -110,10 +110,16 @@ async function processNotaryData(data, id) {
   }
 
   if (data?.total === 0) {
-    console.log(`По данному запросу результатов не найдено: ${data.total}`);
-    console.log(data?.text);
+    const text = "none";
 
-    return await send({ text: "none", id });
+    console.log(`По данному запросу результатов не найдено: ${data.total}`);
+    console.log(text);
+
+    const url = await send({ text, id });
+
+    console.log(url);
+
+    return;
   }
 
   if (data?.data && data?.total === 1) {
@@ -128,12 +134,18 @@ async function processNotaryData(data, id) {
       "utf-8",
     );
 
-    return await send({ text, id });
+    const url = await send({ text, id });
+
+    console.log(url);
+
+    return;
   }
 
-  console.log(data?.text);
+  const text = "error";
+  const url = await send({ text, id });
 
-  return await send({ text: "error", id });
+  console.log(url);
+  console.log(text);
 }
 
 async function fetchNotary(page, body) {
