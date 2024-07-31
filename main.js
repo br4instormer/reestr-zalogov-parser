@@ -1,8 +1,16 @@
 const { setTimeout: sleep } = require("node:timers/promises");
+const { writeFile } = require("node:fs/promises");
+const { exec } = require("node:child_process");
 const { env } = require("node:process");
+const { join } = require("node:path");
 const { firefox } = require("playwright-extra");
+const { send } = require("./humanpost.js");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const { getRandomLine, readLinesFromFile } = require("./utilities.js");
+const {
+  getRandomLine,
+  readLinesFromFile,
+  getRandomInt,
+} = require("./utilities.js");
 const AntiCaptcha = require("./anti-captcha.js");
 
 const ANTICAPTHA_API_KEY = env.ANTICAPTHA_API_KEY;
@@ -28,11 +36,104 @@ function fetchData(page, url, body) {
         mode: "cors",
         body,
       })
-        .then((response) => response.json())
+        .then((response) => {
+          if ("json" in response) {
+            return response.json();
+          }
+
+          throw new Error(response);
+        })
         .catch((r) => new Error(r));
     },
     { url, body },
   );
+}
+
+function getPayloadFomPHP(filename) {
+  return new Promise((resolve, reject) =>
+    exec(`php "${filename}"`, (err, stdout) =>
+      err ? reject(err) : resolve(stdout),
+    ),
+  );
+}
+
+function convertToPayload(parsed) {
+  if (Object.keys(parsed).length === 0 && parsed.constructor === Object) {
+    throw new Error("PHP вернул пустой JSON объект");
+  }
+
+  const { FullName } = parsed;
+
+  if (!FullName) {
+    throw new Error("Отсутствуют данные ФИО в PHP выводе");
+  }
+
+  if (typeof FullName !== "string") {
+    throw new Error("Некорректный формат данных ФИО");
+  }
+
+  const fio = FullName.split(" ");
+
+  if (fio.length !== 3) {
+    throw new Error("Некорректный формат данных ФИО");
+  }
+
+  const { 0: lastName, 1: firstName, 2: middleName } = fio;
+  const { id, Data: birthday } = parsed;
+
+  console.log(
+    `Parsed data: ${lastName} ${firstName} ${middleName} ${birthday} ${id}`,
+  );
+
+  return {
+    mode: "onlyActual",
+    filter: {
+      pledgor: {
+        privatePerson: {
+          lastName,
+          firstName,
+          middleName,
+          district: "",
+          birthday,
+          passport: "",
+        },
+      },
+    },
+    limit: 10,
+    offset: 0,
+  };
+}
+
+async function processNotaryData(data, id) {
+  if (!data) {
+    return;
+  }
+
+  if (data?.total === 0) {
+    console.log(`По данному запросу результатов не найдено: ${data.total}`);
+    console.log(data?.text);
+
+    return await send({ text: "none", id });
+  }
+
+  if (data?.data && data?.total === 1) {
+    const text = JSON.stringify(data?.data);
+    const filename = "responseData.json";
+
+    console.log(`Перехваченный ответ: ${data?.total}`);
+
+    await writeFile(
+      join(__dirname, filename),
+      JSON.stringify(data?.data, null, 2),
+      "utf-8",
+    );
+
+    return await send({ text, id });
+  }
+
+  console.log(data?.text);
+
+  return await send({ text: "error", id });
 }
 
 async function fetchNotary(page, body) {
@@ -63,14 +164,14 @@ async function tryFetchData(tries, executor) {
     data = await executor();
 
     if (data instanceof Error) {
-      tries++;
+      errors++;
       console.warn(`Got error`, data.message);
 
       continue;
     }
 
     if (Object.hasOwn(data, "errorId")) {
-      tries++;
+      errors++;
       console.warn(`Got response with Error: ${data.message}`);
 
       continue;
@@ -82,24 +183,35 @@ async function tryFetchData(tries, executor) {
   return data;
 }
 
-async function process(browser, data) {
+async function getData(browser, data) {
   const page = await browser.newPage();
   const body = JSON.stringify(data);
   const tries = 5;
+  const timeout = 30e3 * 3;
 
+  page.setDefaultTimeout(timeout);
+  page.setDefaultNavigationTimeout(timeout);
   await page.goto("https://www.reestr-zalogov.ru/search", {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
   });
 
-  const { 0: notary, 1: fedresurs } = await Promise.all([
+  const { 0: notary } = await Promise.all([
     tryFetchData(tries, () => fetchNotary(page, body)),
-    tryFetchData(tries, () => fetchFedresurs(page, body)),
   ]);
 
   return {
     notary,
-    fedresurs,
   };
+}
+
+async function process(browser, payload, id) {
+  try {
+    const { notary } = await getData(browser, payload);
+
+    await processNotaryData(notary, id);
+  } catch (r) {
+    console.error(`Error while processing results`, r);
+  }
 }
 
 async function start(instance, userAgents, proxies) {
@@ -111,33 +223,14 @@ async function start(instance, userAgents, proxies) {
       userAgent,
       proxy,
     });
-    const payload = {
-      mode: "onlyActual",
-      filter: {
-        pledgor: {
-          privatePerson: {
-            lastName: "Петров",
-            firstName: "Иван",
-            middleName: "Иванович",
-            district: "",
-            birthday: "05.12.1975",
-            passport: "",
-          },
-        },
-      },
-      limit: 10,
-      offset: 0,
-    };
+    const stdout = await getPayloadFomPHP("start.php");
+    const parsed = JSON.parse(stdout);
+    const { id } = parsed;
+    const payload = convertToPayload(parsed);
 
-    try {
-      const { notary, fedresurs } = await process(browser, payload);
+    console.log(`Browser uses proxy ${proxy.server}. UserAgent: ${userAgent}`);
 
-      console.log(`Notary data is:`, notary);
-      console.log(`Fedresurs data is:`, fedresurs);
-    } catch (r) {
-      console.error(`Error while processing results`, r);
-    }
-
+    await process(browser, payload, id);
     await sleep(3_000);
     await browser.close();
   }
@@ -162,6 +255,15 @@ async function main() {
   });
 
   AntiCaptcha.setAPIKey(ANTICAPTHA_API_KEY);
+
+  do {
+    try {
+      await start(instance, userAgents, proxies);
+    } catch (e) {
+      console.warn(`Got error while processing`, e.message);
+      await sleep(getRandomInt(60_000, 120_000));
+    }
+  } while (true);
 
   await start(instance, userAgents, proxies);
   await instance.close();

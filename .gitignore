@@ -3,4 +3,5 @@
 .env
 proxies.txt
 user_agents.txt
+responseData.json
 node_modules
