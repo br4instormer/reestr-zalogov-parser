@@ -1,6 +1,7 @@
 <?php
+
 //$page_body = file_get_contents("https://get_request?key=asd1234asd&provider=zalog");
-$page_body = "wanted-fsin===12345|Иванов Иван Иванович|01.11.1985";
+$page_body = "wanted-fsin===231312312|Иванов Иван Ивановчи|24.07.1969";
 //$page_body = "wanted-fsin===12345|Петров Петр Иванович|01.11.1985";
 if ($page_body == 'No access' || $page_body == 'None') {
     echo json_encode(['error' => $page_body]); // Вернуть ошибку в формате JSON
