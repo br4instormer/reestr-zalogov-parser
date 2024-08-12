@@ -10,7 +10,7 @@
 
 По просьбе заказчика парсер был интегрирован с системой решения капчи [ruCaptcha](https://rucaptcha.com/enterpage). Изначально решение было основано на [Anti Captcha](https://anti-captcha.com)
 
-Так же в парсер были внедрены эвристики по получению входящих данных из PHP-скрипта `start.php`. Отдельно эти версии можно найти в ветках [rucaptcha](/../rucaptcha/README.md) и [anti-captcha](/../anti-captcha/README.md) соответственно
+Так же в парсер были внедрены эвристики по получению входящих данных из PHP-скрипта `start.php`. Отдельно эти версии можно найти в ветках [rucaptcha](../../rucaptcha/README.md) и [anti-captcha](../../anti-captcha/README.md) соответственно
 
 ## Технологический стэк
 
